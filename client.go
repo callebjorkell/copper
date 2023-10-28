@@ -1,6 +1,7 @@
 package copper
 
 import (
+	"fmt"
 	"io"
 	"net/http"
 )
@@ -10,6 +11,36 @@ import (
 type ValidatingClient struct {
 	c *http.Client
 	*Verifier
+}
+
+type Config struct {
+	base string
+}
+
+type Option func(c *Config) *Config
+
+// WrapClient takes an HTTP client and io.Reader for the OpenAPI spec. The spec is parsed, and wraps the client so that
+// the outbound calls are now recorded when made.
+func WrapClient(c *http.Client, spec io.Reader, opts ...Option) (*ValidatingClient, error) {
+	s, err := io.ReadAll(spec)
+	if err != nil {
+		return nil, fmt.Errorf("could not read spec: %w", err)
+	}
+
+	conf := &Config{}
+	for _, opt := range opts {
+		conf = opt(conf)
+	}
+
+	verifier, err := NewVerifier(s, conf.base)
+	if err != nil {
+		return nil, fmt.Errorf("could not create verifier: %w", err)
+	}
+
+	return &ValidatingClient{
+		c:        c,
+		Verifier: verifier,
+	}, nil
 }
 
 // Do takes any http.Request, sends it to the server it and then records the result.
@@ -42,13 +73,6 @@ func (v ValidatingClient) Post(url string, contentType string, body io.Reader) (
 	return v.recordResponse(v.c.Post(url, contentType, body))
 }
 
-func (v ValidatingClient) recordResponse(resp *http.Response, err error) (*http.Response, error) {
-	if err == nil {
-		v.Record(resp)
-	}
-	return resp, err
-}
-
 // Delete records response for HTTP DELETE requests
 func (v ValidatingClient) Delete(url string) (resp *http.Response, err error) {
 	req, err := http.NewRequest(http.MethodDelete, url, nil)
@@ -56,4 +80,11 @@ func (v ValidatingClient) Delete(url string) (resp *http.Response, err error) {
 		return nil, err
 	}
 	return v.recordResponse(v.c.Do(req))
+}
+
+func (v ValidatingClient) recordResponse(resp *http.Response, err error) (*http.Response, error) {
+	if err == nil {
+		v.Record(resp)
+	}
+	return resp, err
 }
