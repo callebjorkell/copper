@@ -6,8 +6,7 @@ _Copper keeps REST APIs honest_
 
 ## Introduction
 Copper is a test library intended to verify that API contracts are upheld when exercising a REST API from a test. 
-This is very useful for verifying that all paths and functionality that is declared in an API spec is in fact tested,
-and that response payloads are shaped the way the specification states.
+This is very useful for verifying that all paths and functionality that is declared in an API spec is in fact tested.
 
 ## Why?
 Implementing these checks in tests will allow your application to check API correctness and backwards compatibility
