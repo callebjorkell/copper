@@ -13,11 +13,18 @@ type ValidatingClient struct {
 	*Verifier
 }
 
-type Config struct {
+type config struct {
 	base string
 }
 
-type Option func(c *Config) *Config
+type Option func(c *config)
+
+// WithBasePath is a functional Option for setting the base path of the validator.
+func WithBasePath(path string) Option {
+	return func(c *config) {
+		c.base = path
+	}
+}
 
 // WrapClient takes an HTTP client and io.Reader for the OpenAPI spec. The spec is parsed, and wraps the client so that
 // the outbound calls are now recorded when made.
@@ -27,9 +34,9 @@ func WrapClient(c *http.Client, spec io.Reader, opts ...Option) (*ValidatingClie
 		return nil, fmt.Errorf("could not read spec: %w", err)
 	}
 
-	conf := &Config{}
+	conf := &config{}
 	for _, opt := range opts {
-		conf = opt(conf)
+		opt(conf)
 	}
 
 	verifier, err := NewVerifier(s, conf.base)

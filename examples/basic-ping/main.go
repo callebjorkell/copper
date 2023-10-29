@@ -8,7 +8,8 @@ import (
 
 func handlerPing(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
-		w.Write([]byte("pong"))
+		w.Header().Add("Content-Type", "application/json")
+		w.Write([]byte(`{"message": "pong"}`))
 		return
 	}
 

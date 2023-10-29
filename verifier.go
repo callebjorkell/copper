@@ -1,8 +1,13 @@
 package copper
 
 import (
+	"bytes"
+	"context"
 	"fmt"
 	"github.com/getkin/kin-openapi/openapi3"
+	"github.com/getkin/kin-openapi/openapi3filter"
+	"github.com/getkin/kin-openapi/routers"
+	"io"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -27,10 +32,12 @@ type endpoint struct {
 	checked  bool
 	method   string
 	response string
+	route    *routers.Route
 }
 
 type Verifier struct {
 	endpoints []endpoint
+	spec      *openapi3.T
 	base      string
 	errors    []error
 	mu        sync.Mutex
@@ -45,8 +52,13 @@ func NewVerifier(specBytes []byte, basePath string) (*Verifier, error) {
 		return nil, fmt.Errorf("unable to parse spec data: %w", err)
 	}
 
+	if err := spec.Validate(loader.Context); err != nil {
+		return nil, fmt.Errorf("schema is not valid: %w", err)
+	}
+
 	c := Verifier{
 		base: strings.TrimRight(basePath, "/"),
+		spec: spec,
 	}
 
 	for path, item := range spec.Paths {
@@ -61,16 +73,45 @@ func (v *Verifier) Record(res *http.Response) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	for i := range v.endpoints {
-		if v.endpoints[i].method != req.Method {
+		end := &v.endpoints[i]
+		if end.method != req.Method {
 			continue
 		}
 
-		if v.endpoints[i].response != strconv.Itoa(res.StatusCode) {
+		if end.response != strconv.Itoa(res.StatusCode) {
 			continue
 		}
 
-		if v.endpoints[i].uriRe.MatchString(req.URL.EscapedPath()) {
-			v.endpoints[i].checked = true
+		if end.uriRe.MatchString(req.URL.EscapedPath()) {
+			reqInput := &openapi3filter.RequestValidationInput{
+				Request: req,
+				Route:   end.route,
+				Options: &openapi3filter.Options{
+					MultiError: true,
+				},
+			}
+
+			if err := openapi3filter.ValidateRequest(context.Background(), reqInput); err != nil {
+				v.errors = append(v.errors, fmt.Errorf("request invalid: %w", err))
+			}
+
+			bodyBytes := bytes.Buffer{}
+			bodyTee := io.TeeReader(res.Body, &bodyBytes)
+			err := openapi3filter.ValidateResponse(context.Background(), &openapi3filter.ResponseValidationInput{
+				RequestValidationInput: reqInput,
+				Status:                 res.StatusCode,
+				Header:                 res.Header,
+				Body:                   io.NopCloser(bodyTee),
+				Options:                reqInput.Options,
+			})
+			if err != nil {
+				v.errors = append(v.errors, fmt.Errorf("response invalid: %w", err))
+			}
+			if bodyBytes.Len() > 0 {
+				res.Body = io.NopCloser(&bodyBytes)
+			}
+
+			end.checked = true
 			return
 		}
 	}
@@ -110,6 +151,12 @@ func (v *Verifier) loadPath(path string, i *openapi3.PathItem) {
 				response: responseCode,
 				uriRe:    uriRe,
 				path:     v.base + path,
+				route: &routers.Route{
+					Spec:      v.spec,
+					PathItem:  i,
+					Method:    method,
+					Operation: op,
+				},
 			}
 			v.endpoints = append(v.endpoints, e)
 		}
