@@ -1,0 +1,23 @@
+openapi: 3.0.1
+info:
+  title: ping test
+  version: '1.0'
+servers:
+  - url: 'http://localhost:8000/'
+paths:
+  /req:
+    post:
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                input:
+                  type: string
+              required:
+                - input
+      responses:
+        "204":
+          description: "Just an empty response"

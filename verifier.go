@@ -3,6 +3,7 @@ package copper
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/getkin/kin-openapi/openapi3filter"
@@ -14,6 +15,13 @@ import (
 	"strings"
 	"sync"
 	"testing"
+)
+
+var (
+	ErrNotChecked      = errors.New("endpoint not checked")
+	ErrNotPartOfSpec   = errors.New("response is not part of spec")
+	ErrResponseInvalid = errors.New("response invalid")
+	ErrRequestInvalid  = errors.New("request invalid")
 )
 
 var supportedMethods = []string{
@@ -61,7 +69,7 @@ func NewVerifier(specBytes []byte, basePath string) (*Verifier, error) {
 		spec: spec,
 	}
 
-	for path, item := range spec.Paths {
+	for path, item := range spec.Paths.Map() {
 		c.loadPath(path, item)
 	}
 
@@ -70,6 +78,12 @@ func NewVerifier(specBytes []byte, basePath string) (*Verifier, error) {
 
 func (v *Verifier) Record(res *http.Response) {
 	req := res.Request
+
+	// The body has already been read, so try to reset the body since kin-openapi expects this to be readable
+	if req.GetBody != nil {
+		req.Body, _ = req.GetBody()
+	}
+
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	for i := range v.endpoints {
@@ -92,7 +106,10 @@ func (v *Verifier) Record(res *http.Response) {
 			}
 
 			if err := openapi3filter.ValidateRequest(context.Background(), reqInput); err != nil {
-				v.errors = append(v.errors, fmt.Errorf("request invalid: %w", err))
+				v.errors = append(
+					v.errors,
+					errors.Join(ErrRequestInvalid, fmt.Errorf("%s %s: %w", req.Method, req.URL.Path, err)),
+				)
 			}
 
 			bodyBytes := bytes.Buffer{}
@@ -105,7 +122,10 @@ func (v *Verifier) Record(res *http.Response) {
 				Options:                reqInput.Options,
 			})
 			if err != nil {
-				v.errors = append(v.errors, fmt.Errorf("response invalid: %w", err))
+				v.errors = append(
+					v.errors,
+					errors.Join(ErrResponseInvalid, fmt.Errorf("%s %s: %d: %w", req.Method, req.URL.Path, res.StatusCode, err)),
+				)
 			}
 			if bodyBytes.Len() > 0 {
 				res.Body = io.NopCloser(&bodyBytes)
@@ -116,20 +136,35 @@ func (v *Verifier) Record(res *http.Response) {
 		}
 	}
 
-	v.errors = append(v.errors,
-		fmt.Errorf("%v %v with response %v is not part of the spec", req.Method, req.URL.Path, res.StatusCode))
+	v.errors = append(
+		v.errors,
+		errors.Join(ErrNotPartOfSpec, fmt.Errorf("%v %v: %v", req.Method, req.URL.Path, res.StatusCode)),
+	)
 }
 
-func (v *Verifier) Verify(t *testing.T) {
+// Error return the current collection of errors in the verifier.
+func (v *Verifier) Error() error {
 	v.mu.Lock()
 	defer v.mu.Unlock()
-	for _, e := range v.errors {
-		t.Error(e)
-	}
+
+	var errs []error
 	for i := range v.endpoints {
 		if !v.endpoints[i].checked {
-			t.Errorf("%v %v was not checked for response %v", v.endpoints[i].method, v.endpoints[i].path, v.endpoints[i].response)
+			errs = append(
+				errs,
+				errors.Join(ErrNotChecked, fmt.Errorf("%s %s: %s", v.endpoints[i].method, v.endpoints[i].path, v.endpoints[i].response)),
+			)
 		}
+	}
+
+	return errors.Join(append(v.errors, errs...)...)
+}
+
+// Verify will cause the given test context to fail with an error if Error returns a non-nil error.
+func (v *Verifier) Verify(t *testing.T) {
+	err := v.Error()
+	if err != nil {
+		t.Error(err)
 	}
 }
 
@@ -144,7 +179,7 @@ func (v *Verifier) loadPath(path string, i *openapi3.PathItem) {
 			continue
 		}
 
-		for responseCode := range op.Responses {
+		for responseCode := range op.Responses.Map() {
 			e := endpoint{
 				checked:  false,
 				method:   method,

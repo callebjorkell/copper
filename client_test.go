@@ -1,7 +1,14 @@
 package copper
 
 import (
+	"bytes"
+	"fmt"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"strings"
 	"testing"
 )
 
@@ -23,6 +30,133 @@ func TestWithBasePath(t *testing.T) {
 			opt(c)
 
 			assert.Equal(t, tc.want, c.base)
+		})
+	}
+}
+
+func TestWithClient(t *testing.T) {
+	f, err := os.Open("testdata/thing-spec.yaml")
+	require.NoError(t, err)
+	defer f.Close()
+
+	s := httptest.NewServer(http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			if r.URL.Path == "/ping" {
+				_, _ = w.Write([]byte(`{"message":"pong!"}`))
+			} else {
+				_, _ = w.Write([]byte(`{"thing": "yes"}`))
+			}
+		}),
+	)
+	defer s.Close()
+
+	c, err := WrapClient(http.DefaultClient, f)
+	require.NoError(t, err)
+
+	_, err = c.Get(s.URL + "/ping")
+	assert.NoError(t, err)
+
+	other, err := c.WithClient(&http.Client{})
+	require.NoError(t, err)
+
+	_, err = other.Get(s.URL + "/other")
+	assert.NoError(t, err)
+
+	c.Verify(t)
+}
+
+type numberHandler struct {
+	contentType string
+	path        string
+	number      string
+}
+
+func (n *numberHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", n.contentType)
+	w.WriteHeader(http.StatusOK)
+	if r.URL.Path == n.path {
+		_, _ = w.Write([]byte(fmt.Sprintf("{\"number\": %v}", n.number)))
+	}
+}
+
+func TestValidationErrors(t *testing.T) {
+	f, err := os.ReadFile("testdata/minimal-spec.yaml")
+	require.NoError(t, err)
+
+	tt := []struct {
+		name        string
+		contentType string
+		number      string
+		requestPath string
+	}{
+		{"wrong path", "application/json", "2", "/wrong"},
+		{"not a number", "application/json", "two", "/mini"},
+		{"base path", "application/json", "2", "/"},
+		{"no content type", "", "2", "/mini"},
+		{"wrong content type", "text/plain", "2", "/mini"},
+		{"empty number", "application/json", "", "/mini"},
+	}
+
+	handler := &numberHandler{}
+	s := httptest.NewServer(handler)
+	defer s.Close()
+
+	for _, tc := range tt {
+		t.Run(tc.name, func(t *testing.T) {
+			handler.path, handler.contentType, handler.number = tc.requestPath, tc.contentType, tc.number
+
+			r := bytes.NewReader(f)
+			c, err := WrapClient(http.DefaultClient, r)
+			require.NoError(t, err)
+
+			assert.Error(t, c.Error())
+		})
+	}
+}
+
+func TestRequestBodyValidation(t *testing.T) {
+	f, err := os.ReadFile("testdata/request-body-spec.yaml")
+	require.NoError(t, err)
+
+	s := httptest.NewServer(http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusNoContent)
+		}),
+	)
+	defer s.Close()
+
+	tt := []struct {
+		name        string
+		contentType string
+		body        string
+		shouldError bool
+	}{
+		{"according to spec", "application/json", `{"input":"pem"}`, false},
+		{"wrong content type", "text/plain", `{"input":"pem"}`, true},
+		{"wrong input field type", "application/json", `{"input":5}`, true},
+		{"missing input field", "application/json", `{"message":"stuff"}`, true},
+		{"extra fields in body", "application/json", `{"input": "yes", "message":"stuff"}`, false},
+		{"empty content type", "", `{"input":"pem"}`, true},
+		{"empty body", "application/json", "", true},
+	}
+
+	for _, tc := range tt {
+		t.Run(tc.name, func(t *testing.T) {
+			r := bytes.NewReader(f)
+			c, err := WrapClient(http.DefaultClient, r)
+			require.NoError(t, err)
+
+			res, err := c.Post(s.URL+"/req", tc.contentType, strings.NewReader(tc.body))
+			require.Equal(t, 204, res.StatusCode)
+
+			assert.NoError(t, err)
+			if tc.shouldError {
+				assert.ErrorIs(t, c.Error(), ErrRequestInvalid)
+			} else {
+				assert.NoError(t, c.Error())
+			}
 		})
 	}
 }
