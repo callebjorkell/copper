@@ -1,0 +1,20 @@
+openapi: 3.0.1
+info:
+  title: delete test
+  version: '1.0'
+servers:
+  - url: 'http://localhost:8000/'
+paths:
+  /thing/{id}:
+    parameters:
+      - name: id
+        required: true
+        in: path
+        schema:
+          type: integer
+          minimum: 10
+        description: The ID of the thing
+    delete:
+      responses:
+        204:
+          description: Delete the thing!

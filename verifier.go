@@ -70,7 +70,10 @@ func NewVerifier(specBytes []byte, basePath string) (*Verifier, error) {
 	}
 
 	for path, item := range spec.Paths.Map() {
-		c.loadPath(path, item)
+		err = c.loadPath(path, item)
+		if err != nil {
+			return nil, fmt.Errorf("unable to load path %q: %w", path, err)
+		}
 	}
 
 	return &c, nil
@@ -97,9 +100,16 @@ func (v *Verifier) Record(res *http.Response) {
 		}
 
 		if end.uriRe.MatchString(req.URL.EscapedPath()) {
+			matches := end.uriRe.FindStringSubmatch(req.URL.EscapedPath())
+			params := make(map[string]string)
+			for i, name := range end.uriRe.SubexpNames() {
+				params[name] = matches[i]
+			}
+
 			reqInput := &openapi3filter.RequestValidationInput{
-				Request: req,
-				Route:   end.route,
+				Request:    req,
+				Route:      end.route,
+				PathParams: params,
 				Options: &openapi3filter.Options{
 					MultiError: true,
 				},
@@ -168,10 +178,15 @@ func (v *Verifier) Verify(t *testing.T) {
 	}
 }
 
-func (v *Verifier) loadPath(path string, i *openapi3.PathItem) {
-	re, _ := regexp.Compile("{[^}]*}")
-	uri := fmt.Sprintf("^%v%v$", v.base, re.ReplaceAllLiteralString(path, "[^/]+"))
-	uriRe, _ := regexp.Compile(uri)
+func (v *Verifier) loadPath(path string, i *openapi3.PathItem) error {
+	// Turn the path into a regular expression with named capture groups corresponding to the name of the parameter
+	// in the spec.
+	re := regexp.MustCompile("{([^}]*)}")
+	uri := fmt.Sprintf("^%v%v$", v.base, re.ReplaceAllString(path, "(?P<$1>[^/]+)"))
+	uriRe, err := regexp.Compile(uri)
+	if err != nil {
+		return fmt.Errorf("could not compile regex for %v: %w", path, err)
+	}
 
 	for _, method := range supportedMethods {
 		op := i.GetOperation(method)
@@ -196,4 +211,6 @@ func (v *Verifier) loadPath(path string, i *openapi3.PathItem) {
 			v.endpoints = append(v.endpoints, e)
 		}
 	}
+
+	return nil
 }

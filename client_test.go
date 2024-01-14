@@ -17,9 +17,10 @@ func TestWithBasePath(t *testing.T) {
 		path string
 		want string
 	}{
-		{"", ""},
+		{"", "/"},
 		{"/something", "/something"},
-		{"/some/thing/", "/some/thing/"},
+		{"/some/thing/", "/some/thing"},
+		{"somebase", "/somebase"},
 	}
 
 	for _, tc := range tt {
@@ -30,6 +31,77 @@ func TestWithBasePath(t *testing.T) {
 			opt(c)
 
 			assert.Equal(t, tc.want, c.base)
+		})
+	}
+}
+
+func TestDifferentBase(t *testing.T) {
+	f, err := os.Open("testdata/delete-spec.yaml")
+	require.NoError(t, err)
+	defer f.Close()
+
+	s := httptest.NewServer(http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/mybase/thing/10" {
+				w.WriteHeader(http.StatusNoContent)
+			} else {
+				w.WriteHeader(http.StatusBadRequest)
+			}
+		}),
+	)
+	defer s.Close()
+
+	c, err := WrapClient(http.DefaultClient, f, WithBasePath("/mybase"))
+	require.NoError(t, err)
+
+	_, err = c.Delete(s.URL + "/mybase/thing/10")
+	assert.NoError(t, err)
+
+	c.Verify(t)
+}
+
+func TestParamValidation(t *testing.T) {
+	f, err := os.ReadFile("testdata/param-spec.yaml")
+	require.NoError(t, err)
+
+	s := httptest.NewServer(http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusNoContent)
+		}),
+	)
+	defer s.Close()
+
+	tt := []struct {
+		name   string
+		rName  string
+		age    string
+		gender string
+		valid  bool
+	}{
+		{"too short name", "Bob", "2", "other", false},
+		{"empty name", "", "2", "other", false},
+		{"invalid age", "Bobaloo", "-1", "other", false},
+		{"fine female", "Mrs Bobaloo", "105", "female", true},
+		{"fine male", "Bobaloo", "62", "male", true},
+		{"fine other", "Bobaloo", "62", "other", true},
+		{"bad alien", "Bobaloo", "62", "alien", false},
+		{"empty gender", "Bobaloo", "62", "", false},
+		{"empty age", "Bobaloo", "", "", false},
+	}
+
+	for _, tc := range tt {
+		t.Run(tc.name, func(t *testing.T) {
+			c, err := WrapClient(http.DefaultClient, bytes.NewReader(f))
+			require.NoError(t, err)
+
+			_, err = c.Head(fmt.Sprintf("%s/%s/%s/%s", s.URL, tc.rName, tc.age, tc.gender))
+			assert.NoError(t, err)
+
+			if tc.valid {
+				assert.NoError(t, c.Error())
+			} else {
+				assert.Error(t, c.Error())
+			}
 		})
 	}
 }
@@ -82,7 +154,7 @@ func (n *numberHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func TestValidationErrors(t *testing.T) {
-	f, err := os.ReadFile("testdata/minimal-spec.yaml")
+	f, err := os.ReadFile("testdata/number-spec.yaml")
 	require.NoError(t, err)
 
 	tt := []struct {

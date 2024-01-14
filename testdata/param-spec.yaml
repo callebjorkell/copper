@@ -1,0 +1,36 @@
+openapi: 3.0.1
+info:
+  title: parameter test
+  version: '1.0'
+servers:
+  - url: 'http://localhost:8000/'
+paths:
+  /{name}/{age}/{gender}:
+    parameters:
+      - name: name
+        required: true
+        in: path
+        schema:
+          type: string
+          minLength: 5
+        description: name
+      - name: age
+        required: true
+        in: path
+        schema:
+          type: integer
+          minimum: 0
+      - name: gender
+        in: path
+        required: true
+        schema:
+          type: string
+          enum:
+            - male
+            - female
+            - other
+    head:
+      responses:
+        204:
+          description: "empty response"
+

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 )
 
 // ValidatingClient provides an HTTP client, and wraps the main methods, recording any and all paths that are being
@@ -22,7 +23,7 @@ type Option func(c *config)
 // WithBasePath is a functional Option for setting the base path of the validator.
 func WithBasePath(path string) Option {
 	return func(c *config) {
-		c.base = path
+		c.base = "/" + strings.Trim(path, "/")
 	}
 }
 
