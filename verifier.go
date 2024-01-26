@@ -17,13 +17,6 @@ import (
 	"testing"
 )
 
-var (
-	ErrNotChecked      = errors.New("endpoint not checked")
-	ErrNotPartOfSpec   = errors.New("response is not part of spec")
-	ErrResponseInvalid = errors.New("response invalid")
-	ErrRequestInvalid  = errors.New("request invalid")
-)
-
 var supportedMethods = []string{
 	http.MethodGet,
 	http.MethodHead,
@@ -51,9 +44,48 @@ type Verifier struct {
 	mu        sync.Mutex
 }
 
+// NewExactVerifier does not skip any part of the spec, for example internal server errors, and will require them to be
+// checked if defined in the spec.
+func NewExactVerifier(specBytes []byte, basePath string) (*Verifier, error) {
+	v, err := newVerifier(specBytes, basePath)
+	if err != nil {
+		return v, err
+	}
+
+	if err := v.loadPaths(false); err != nil {
+		return nil, err
+	}
+	return v, nil
+}
+
 // NewVerifier takes bytes for an OpenAPI spec and a base path, and then returns a new Verifier that contains the
-// declared paths.
+// declared paths. NewVerifier will not check internal server errors even if they are included in the spec.
 func NewVerifier(specBytes []byte, basePath string) (*Verifier, error) {
+	v, err := newVerifier(specBytes, basePath)
+	if err != nil {
+		return v, err
+	}
+
+	if err := v.loadPaths(true); err != nil {
+		return nil, err
+	}
+	return v, nil
+}
+
+func newVerifier(specBytes []byte, basePath string) (*Verifier, error) {
+	spec, err := loadSpec(specBytes)
+	if err != nil {
+		return nil, err
+	}
+
+	v := Verifier{
+		base: strings.TrimRight(basePath, "/"),
+		spec: spec,
+	}
+	return &v, nil
+}
+
+func loadSpec(specBytes []byte) (*openapi3.T, error) {
 	loader := openapi3.NewLoader()
 	spec, err := loader.LoadFromData(specBytes)
 	if err != nil {
@@ -63,20 +95,24 @@ func NewVerifier(specBytes []byte, basePath string) (*Verifier, error) {
 	if err := spec.Validate(loader.Context); err != nil {
 		return nil, fmt.Errorf("schema is not valid: %w", err)
 	}
+	return spec, nil
+}
 
-	c := Verifier{
-		base: strings.TrimRight(basePath, "/"),
-		spec: spec,
+// loadPaths the paths into the data structure used verification
+// if lenient is set, internal errors will be skipped.
+func (v *Verifier) loadPaths(lenient bool) error {
+	if v.spec == nil {
+		return fmt.Errorf("spec is nil")
 	}
 
-	for path, item := range spec.Paths.Map() {
-		err = c.loadPath(path, item)
+	for path, item := range v.spec.Paths.Map() {
+		err := v.loadPath(path, item, lenient)
 		if err != nil {
-			return nil, fmt.Errorf("unable to load path %q: %w", path, err)
+			return fmt.Errorf("unable to loadPaths path %q: %w", path, err)
 		}
 	}
 
-	return &c, nil
+	return nil
 }
 
 func (v *Verifier) Record(res *http.Response) {
@@ -118,7 +154,7 @@ func (v *Verifier) Record(res *http.Response) {
 			if err := openapi3filter.ValidateRequest(context.Background(), reqInput); err != nil {
 				v.errors = append(
 					v.errors,
-					errors.Join(ErrRequestInvalid, fmt.Errorf("%s %s: %w", req.Method, req.URL.Path, err)),
+					joinError(ErrRequestInvalid, fmt.Errorf("%s %s: %w", req.Method, req.URL.Path, err)),
 				)
 			}
 
@@ -134,7 +170,7 @@ func (v *Verifier) Record(res *http.Response) {
 			if err != nil {
 				v.errors = append(
 					v.errors,
-					errors.Join(ErrResponseInvalid, fmt.Errorf("%s %s: %d: %w", req.Method, req.URL.Path, res.StatusCode, err)),
+					joinError(ErrResponseInvalid, fmt.Errorf("%s %s: %d: %w", req.Method, req.URL.Path, res.StatusCode, err)),
 				)
 			}
 			if bodyBytes.Len() > 0 {
@@ -148,37 +184,42 @@ func (v *Verifier) Record(res *http.Response) {
 
 	v.errors = append(
 		v.errors,
-		errors.Join(ErrNotPartOfSpec, fmt.Errorf("%v %v: %v", req.Method, req.URL.Path, res.StatusCode)),
+		joinError(ErrNotPartOfSpec, fmt.Errorf("%v %v: %v", req.Method, req.URL.Path, res.StatusCode)),
 	)
 }
 
-// Error return the current collection of errors in the verifier.
-func (v *Verifier) Error() error {
+// CurrentError is a convenience method for CurrentErrors, where the errors are joined into a single error, making
+// it easier to check.
+func (v *Verifier) CurrentError() error {
+	return errors.Join(v.CurrentErrors()...)
+}
+
+// CurrentErrors return the current collection of errors in the verifier.
+func (v *Verifier) CurrentErrors() []error {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 
 	var errs []error
 	for i := range v.endpoints {
 		if !v.endpoints[i].checked {
-			errs = append(
-				errs,
-				errors.Join(ErrNotChecked, fmt.Errorf("%s %s: %s", v.endpoints[i].method, v.endpoints[i].path, v.endpoints[i].response)),
-			)
+			err := fmt.Errorf("%s %s: %s", v.endpoints[i].method, v.endpoints[i].path, v.endpoints[i].response)
+			errs = append(errs, joinError(ErrNotChecked, err))
 		}
 	}
 
-	return errors.Join(append(v.errors, errs...)...)
+	return append(v.errors, errs...)
 }
 
 // Verify will cause the given test context to fail with an error if Error returns a non-nil error.
 func (v *Verifier) Verify(t *testing.T) {
-	err := v.Error()
+	err := v.CurrentError()
 	if err != nil {
 		t.Error(err)
 	}
+	return
 }
 
-func (v *Verifier) loadPath(path string, i *openapi3.PathItem) error {
+func (v *Verifier) loadPath(path string, i *openapi3.PathItem, lenient bool) error {
 	// Turn the path into a regular expression with named capture groups corresponding to the name of the parameter
 	// in the spec.
 	re := regexp.MustCompile("{([^}]*)}")
@@ -195,6 +236,10 @@ func (v *Verifier) loadPath(path string, i *openapi3.PathItem) error {
 		}
 
 		for responseCode := range op.Responses.Map() {
+			if lenient && responseCode == "500" {
+				continue
+			}
+
 			e := endpoint{
 				checked:  false,
 				method:   method,

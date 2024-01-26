@@ -2,6 +2,7 @@ package copper
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -30,7 +31,7 @@ func TestWithBasePath(t *testing.T) {
 
 			opt(c)
 
-			assert.Equal(t, tc.want, c.base)
+			assert.Equal(t, tc.want, c.baseURL)
 		})
 	}
 }
@@ -98,9 +99,9 @@ func TestParamValidation(t *testing.T) {
 			assert.NoError(t, err)
 
 			if tc.valid {
-				assert.NoError(t, c.Error())
+				assert.Empty(t, c.CurrentErrors())
 			} else {
-				assert.Error(t, c.Error())
+				assert.NotEmpty(t, c.CurrentErrors())
 			}
 		})
 	}
@@ -183,7 +184,8 @@ func TestValidationErrors(t *testing.T) {
 			c, err := WrapClient(http.DefaultClient, r)
 			require.NoError(t, err)
 
-			assert.Error(t, c.Error())
+			errs := c.CurrentErrors()
+			assert.NotEmpty(t, errs)
 		})
 	}
 }
@@ -225,9 +227,13 @@ func TestRequestBodyValidation(t *testing.T) {
 
 			assert.NoError(t, err)
 			if tc.shouldError {
-				assert.ErrorIs(t, c.Error(), ErrRequestInvalid)
+				current := c.CurrentErrors()
+				if assert.NotEmpty(t, current) {
+					joined := errors.Join(current...)
+					assert.ErrorIs(t, joined, ErrRequestInvalid)
+				}
 			} else {
-				assert.NoError(t, c.Error())
+				assert.Empty(t, c.CurrentErrors())
 			}
 		})
 	}

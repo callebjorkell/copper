@@ -15,7 +15,8 @@ type ValidatingClient struct {
 }
 
 type config struct {
-	base string
+	baseURL                   string
+	checkInternalServerErrors bool
 }
 
 type Option func(c *config)
@@ -23,7 +24,16 @@ type Option func(c *config)
 // WithBasePath is a functional Option for setting the base path of the validator.
 func WithBasePath(path string) Option {
 	return func(c *config) {
-		c.base = "/" + strings.Trim(path, "/")
+		c.baseURL = "/" + strings.Trim(path, "/")
+	}
+}
+
+// WithInternalServerErrors is a functional Option for also validating server responses. These are skipped by default
+// since a server should not ideally have internal server errors, and even if they are not part of a specification, they
+// considered a possible response from an API.
+func WithInternalServerErrors() Option {
+	return func(c *config) {
+		c.checkInternalServerErrors = true
 	}
 }
 
@@ -40,7 +50,12 @@ func WrapClient(c *http.Client, spec io.Reader, opts ...Option) (*ValidatingClie
 		opt(conf)
 	}
 
-	verifier, err := NewVerifier(s, conf.base)
+	var verifier *Verifier
+	if conf.checkInternalServerErrors {
+		verifier, err = NewExactVerifier(s, conf.baseURL)
+	} else {
+		verifier, err = NewVerifier(s, conf.baseURL)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("could not create verifier: %w", err)
 	}
