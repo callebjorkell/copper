@@ -17,9 +17,7 @@ func TestCurrentErrors(t *testing.T) {
 	require.NoError(t, err)
 
 	errs := v.CurrentErrors()
-	if assert.NotEmpty(t, errs) {
-
-	}
+	assert.NotEmpty(t, errs)
 }
 
 func TestCurrentError(t *testing.T) {

@@ -216,7 +216,6 @@ func (v *Verifier) Verify(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	return
 }
 
 func (v *Verifier) loadPath(path string, i *openapi3.PathItem, lenient bool) error {
