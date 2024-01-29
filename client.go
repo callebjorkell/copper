@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 )
 
 // ValidatingClient provides an HTTP client, and wraps the main methods, recording any and all paths that are being
@@ -12,29 +11,6 @@ import (
 type ValidatingClient struct {
 	c *http.Client
 	*Verifier
-}
-
-type config struct {
-	baseURL                   string
-	checkInternalServerErrors bool
-}
-
-type Option func(c *config)
-
-// WithBasePath is a functional Option for setting the base path of the validator.
-func WithBasePath(path string) Option {
-	return func(c *config) {
-		c.baseURL = "/" + strings.Trim(path, "/")
-	}
-}
-
-// WithInternalServerErrors is a functional Option for also validating server responses. These are skipped by default
-// since a server should not ideally have internal server errors, and even if they are not part of a specification, they
-// considered a possible response from an API.
-func WithInternalServerErrors() Option {
-	return func(c *config) {
-		c.checkInternalServerErrors = true
-	}
 }
 
 // WrapClient takes an HTTP client and io.Reader for the OpenAPI spec. The spec is parsed, and wraps the client so that
@@ -45,17 +21,7 @@ func WrapClient(c *http.Client, spec io.Reader, opts ...Option) (*ValidatingClie
 		return nil, fmt.Errorf("could not read spec: %w", err)
 	}
 
-	conf := &config{}
-	for _, opt := range opts {
-		opt(conf)
-	}
-
-	var verifier *Verifier
-	if conf.checkInternalServerErrors {
-		verifier, err = NewExactVerifier(s, conf.baseURL)
-	} else {
-		verifier, err = NewVerifier(s, conf.baseURL)
-	}
+	verifier, err := NewVerifier(s, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("could not create verifier: %w", err)
 	}

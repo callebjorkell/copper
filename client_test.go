@@ -31,7 +31,7 @@ func TestWithBasePath(t *testing.T) {
 
 			opt(c)
 
-			assert.Equal(t, tc.want, c.baseURL)
+			assert.Equal(t, tc.want, c.basePath)
 		})
 	}
 }
@@ -219,7 +219,7 @@ func TestRequestBodyValidation(t *testing.T) {
 	for _, tc := range tt {
 		t.Run(tc.name, func(t *testing.T) {
 			r := bytes.NewReader(f)
-			c, err := WrapClient(http.DefaultClient, r)
+			c, err := WrapClient(http.DefaultClient, r, WithRequestBodyValidation())
 			require.NoError(t, err)
 
 			res, err := c.Post(s.URL+"/req", tc.contentType, strings.NewReader(tc.body))
