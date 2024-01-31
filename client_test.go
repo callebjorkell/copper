@@ -92,7 +92,7 @@ func TestParamValidation(t *testing.T) {
 
 	for _, tc := range tt {
 		t.Run(tc.name, func(t *testing.T) {
-			c, err := WrapClient(http.DefaultClient, bytes.NewReader(f))
+			c, err := WrapClient(http.DefaultClient, bytes.NewReader(f), WithRequestValidation())
 			require.NoError(t, err)
 
 			_, err = c.Head(fmt.Sprintf("%s/%s/%s/%s", s.URL, tc.rName, tc.age, tc.gender))
@@ -219,7 +219,7 @@ func TestRequestBodyValidation(t *testing.T) {
 	for _, tc := range tt {
 		t.Run(tc.name, func(t *testing.T) {
 			r := bytes.NewReader(f)
-			c, err := WrapClient(http.DefaultClient, r, WithRequestBodyValidation())
+			c, err := WrapClient(http.DefaultClient, r, WithRequestValidation())
 			require.NoError(t, err)
 
 			res, err := c.Post(s.URL+"/req", tc.contentType, strings.NewReader(tc.body))

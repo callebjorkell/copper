@@ -7,7 +7,7 @@ type Option func(c *config)
 type config struct {
 	basePath                  string
 	checkInternalServerErrors bool
-	checkRequestBody          bool
+	checkRequest              bool
 }
 
 func getConfig(opts ...Option) config {
@@ -36,12 +36,12 @@ func WithInternalServerErrors() Option {
 	}
 }
 
-// WithRequestBodyValidation is a functional Option for checking request bodies as they are sent. Doing validation of
-// the body by default might conflict with checking error cases (400 responses specifically), so it does not happen by
-// default. Enabling checking will produce an error for each request that contains a body that is not in accordance with
+// WithRequestValidation is a functional Option for checking request parameters and bodies as they are sent. Doing
+// validation of the request by default might conflict with checking error cases (400 responses specifically), so it
+// does not happen by default. Enabling checking will produce an error for each request that is not in accordance with
 // the specification for that endpoint.
-func WithRequestBodyValidation() Option {
+func WithRequestValidation() Option {
 	return func(c *config) {
-		c.checkRequestBody = true
+		c.checkRequest = true
 	}
 }

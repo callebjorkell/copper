@@ -125,16 +125,17 @@ func (v *Verifier) Record(res *http.Response) {
 				Route:      end.route,
 				PathParams: params,
 				Options: &openapi3filter.Options{
-					MultiError:         true,
-					ExcludeRequestBody: !v.conf.checkRequestBody,
+					MultiError: true,
 				},
 			}
 
-			if err := openapi3filter.ValidateRequest(context.Background(), reqInput); err != nil {
-				v.errors = append(
-					v.errors,
-					joinError(ErrRequestInvalid, fmt.Errorf("%s %s: %w", req.Method, req.URL.Path, err)),
-				)
+			if v.conf.checkRequest {
+				if err := openapi3filter.ValidateRequest(context.Background(), reqInput); err != nil {
+					v.errors = append(
+						v.errors,
+						joinError(ErrRequestInvalid, fmt.Errorf("%s %s: %w", req.Method, req.URL.Path, err)),
+					)
+				}
 			}
 
 			bodyBytes := bytes.Buffer{}
