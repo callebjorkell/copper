@@ -108,12 +108,12 @@ func (v *Verifier) Record(res *http.Response) {
 		count := v.reqCounter.Add(1)
 		reqDump, err := httputil.DumpRequestOut(req, true)
 		if err == nil {
-			v.conf.requestLogger.Print(fmt.Sprintf("REQUEST  %04d ====\n%s", count, string(reqDump)))
+			v.conf.requestLogger.Logf("REQUEST  %04d ====\n%s", count, string(reqDump))
 		}
 
 		resDump, err := httputil.DumpResponse(res, true)
 		if err == nil {
-			v.conf.requestLogger.Print(fmt.Sprintf("RESPONSE %04d ====\n%s", count, string(resDump)))
+			v.conf.requestLogger.Logf("RESPONSE %04d ====\n%s", count, string(resDump))
 		}
 	}
 

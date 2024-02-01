@@ -160,10 +160,10 @@ type logStore struct {
 	logs []string
 }
 
-func (l *logStore) Print(s string) {
+func (l *logStore) Logf(format string, args ...any) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.logs = append(l.logs, s)
+	l.logs = append(l.logs, fmt.Sprintf(format, args...))
 }
 
 func TestRequestLogging(t *testing.T) {

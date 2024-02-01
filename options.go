@@ -47,8 +47,10 @@ func WithRequestValidation() Option {
 	}
 }
 
+// RequestLogger is a minimal interface that can fit for example a testing.T, allowing tests to easily print logs where
+// needed.
 type RequestLogger interface {
-	Print(string)
+	Logf(format string, args ...any)
 }
 
 // WithRequestLogging is a functional Option that provides a logger that copper will use to log out requests and
