@@ -8,6 +8,7 @@ type config struct {
 	basePath                  string
 	checkInternalServerErrors bool
 	checkRequest              bool
+	requestLogger             RequestLogger
 }
 
 func getConfig(opts ...Option) config {
@@ -43,5 +44,18 @@ func WithInternalServerErrors() Option {
 func WithRequestValidation() Option {
 	return func(c *config) {
 		c.checkRequest = true
+	}
+}
+
+type RequestLogger interface {
+	Print(string)
+}
+
+// WithRequestLogging is a functional Option that provides a logger that copper will use to log out requests and
+// responses. This can be useful for debugging, or writing initial tests for an endpoint, but will add quite a lot
+// of log output for larger test suites.
+func WithRequestLogging(l RequestLogger) Option {
+	return func(c *config) {
+		c.requestLogger = l
 	}
 }

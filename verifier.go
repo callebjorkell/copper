@@ -10,9 +10,11 @@ import (
 	"github.com/getkin/kin-openapi/routers"
 	"io"
 	"net/http"
+	"net/http/httputil"
 	"regexp"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"testing"
 )
 
@@ -36,11 +38,12 @@ type endpoint struct {
 }
 
 type Verifier struct {
-	endpoints []endpoint
-	spec      *openapi3.T
-	errors    []error
-	conf      config
-	mu        sync.Mutex
+	endpoints  []endpoint
+	spec       *openapi3.T
+	errors     []error
+	conf       config
+	mu         sync.Mutex
+	reqCounter atomic.Int64
 }
 
 // NewVerifier takes bytes for an OpenAPI spec and options, and then returns a new Verifier for the given spec. Supply
@@ -101,6 +104,19 @@ func (v *Verifier) Record(res *http.Response) {
 		req.Body, _ = req.GetBody()
 	}
 
+	if v.conf.requestLogger != nil {
+		count := v.reqCounter.Add(1)
+		reqDump, err := httputil.DumpRequestOut(req, true)
+		if err == nil {
+			v.conf.requestLogger.Print(fmt.Sprintf("REQUEST  %04d ====\n%s", count, string(reqDump)))
+		}
+
+		resDump, err := httputil.DumpResponse(res, true)
+		if err == nil {
+			v.conf.requestLogger.Print(fmt.Sprintf("RESPONSE %04d ====\n%s", count, string(resDump)))
+		}
+	}
+
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	for i := range v.endpoints {
@@ -147,6 +163,7 @@ func (v *Verifier) Record(res *http.Response) {
 				Body:                   io.NopCloser(bodyTee),
 				Options:                reqInput.Options,
 			})
+
 			if err != nil {
 				v.errors = append(
 					v.errors,

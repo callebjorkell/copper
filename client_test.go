@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -152,6 +153,44 @@ func (n *numberHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == n.path {
 		_, _ = w.Write([]byte(fmt.Sprintf("{\"number\": %v}", n.number)))
 	}
+}
+
+type logStore struct {
+	mu   sync.Mutex
+	logs []string
+}
+
+func (l *logStore) Print(s string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.logs = append(l.logs, s)
+}
+
+func TestRequestLogging(t *testing.T) {
+	f, err := os.ReadFile("testdata/minimal-spec.yaml")
+	require.NoError(t, err)
+
+	s := httptest.NewServer(http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusNoContent)
+		}),
+	)
+
+	r := bytes.NewReader(f)
+	store := &logStore{}
+	c, err := WrapClient(http.DefaultClient, r, WithRequestLogging(store))
+	require.NoError(t, err)
+
+	_, err = c.Get(s.URL + "/ping")
+	require.NoError(t, err)
+
+	if assert.Len(t, store.logs, 2) {
+		for _, log := range store.logs {
+			assert.NotEmpty(t, log)
+		}
+	}
+
+	c.Verify(t)
 }
 
 func TestValidationErrors(t *testing.T) {
