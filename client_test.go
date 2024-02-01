@@ -108,7 +108,7 @@ func TestParamValidation(t *testing.T) {
 	}
 }
 
-func TestWithClient(t *testing.T) {
+func TestWrapClient(t *testing.T) {
 	f, err := os.Open("testdata/thing-spec.yaml")
 	require.NoError(t, err)
 	defer f.Close()
@@ -223,7 +223,20 @@ func TestValidationErrors(t *testing.T) {
 			c, err := WrapClient(http.DefaultClient, r)
 			require.NoError(t, err)
 
+			url := fmt.Sprintf("%s%s", s.URL, tc.requestPath)
+			_, err = c.Get(url)
+			assert.NoError(t, err)
+
+			// filter away any "not checked errors", and only check the other ones.
 			errs := c.CurrentErrors()
+			i := 0
+			for _, err := range errs {
+				if !errors.Is(err, ErrNotChecked) {
+					errs[i] = err
+					i++
+				}
+			}
+			errs = errs[:i]
 			assert.NotEmpty(t, errs)
 		})
 	}
