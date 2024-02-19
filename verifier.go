@@ -200,10 +200,12 @@ func (v *Verifier) CurrentErrors() []error {
 	defer v.mu.Unlock()
 
 	var errs []error
-	for i := range v.endpoints {
-		if !v.endpoints[i].checked {
-			err := fmt.Errorf("%s %s: %s", v.endpoints[i].method, v.endpoints[i].path, v.endpoints[i].response)
-			errs = append(errs, joinError(ErrNotChecked, err))
+	if !v.conf.disableFullCoverage {
+		for i := range v.endpoints {
+			if !v.endpoints[i].checked {
+				err := fmt.Errorf("%s %s: %s", v.endpoints[i].method, v.endpoints[i].path, v.endpoints[i].response)
+				errs = append(errs, joinError(ErrNotChecked, err))
+			}
 		}
 	}
 

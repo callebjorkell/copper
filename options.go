@@ -9,6 +9,7 @@ type config struct {
 	checkInternalServerErrors bool
 	checkRequest              bool
 	requestLogger             RequestLogger
+	disableFullCoverage       bool
 }
 
 func getConfig(opts ...Option) config {
@@ -44,6 +45,16 @@ func WithInternalServerErrors() Option {
 func WithRequestValidation() Option {
 	return func(c *config) {
 		c.checkRequest = true
+	}
+}
+
+// WithoutFullCoverage is a functional Option for disabling verification that full coverage of the API has been
+// accomplished. Full coverage is defined as having a test covering all documented response codes for all documented
+// endpoint paths and methods. Using this option will still verify that no undocumented endpoints have been hit, as
+// well as checking schemas for all valid interactions.
+func WithoutFullCoverage() Option {
+	return func(c *config) {
+		c.disableFullCoverage = true
 	}
 }
 

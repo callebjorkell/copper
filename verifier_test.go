@@ -119,4 +119,21 @@ func TestWithRequestValidation(t *testing.T) {
 
 		assert.ErrorIs(t, v.CurrentError(), ErrRequestInvalid)
 	})
+
+	t.Run("disabling full coverage validation allows untested endpoints", func(t *testing.T) {
+		v, err := NewVerifier(queryParamSpec, WithoutFullCoverage())
+		require.NoError(t, err)
+		assert.NoError(t, v.CurrentError())
+	})
+
+	t.Run("disabling full coverage validation does not allow undocumented requests", func(t *testing.T) {
+		v, err := NewVerifier(queryParamSpec, WithoutFullCoverage())
+
+		req := httptest.NewRequest(http.MethodGet, "/some-other-path", nil)
+		req.Header.Set("Content-Type", "application/json")
+		v.Record(&http.Response{StatusCode: 204, Request: req})
+
+		require.NoError(t, err)
+		assert.ErrorIs(t, v.CurrentError(), ErrNotPartOfSpec)
+	})
 }
