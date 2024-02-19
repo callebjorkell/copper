@@ -35,6 +35,8 @@ Having full test coverage of the API also helps retain backwards compatibility o
 dependency between the tests and the specification. This also makes sure that any new endpoints have to be both 
 documented and tested, or neither.
 
+NOTE: This behaviour can be disabled with an [option](#options).
+
 # Usage
 Copper is used from integration/contract style tests. Wrap the HTTP client being used in copper and then use that client 
 for performing the API calls in your test case. This works best from a single main test for a single spec, and then 
@@ -64,8 +66,19 @@ func TestVersion1(t *testing.T) {
 	client.Verify(t)
 }
 ```
-
 See the [examples](examples) for complete examples.
+
+## Options
+To alter the behavior of copper and control what type of validation will be done, functional options can be passed to
+the `WrapClient` or stand-alone `NewVerifier` constructors. The options are as follows:
+- `WithBasePath`: Sets the base path for the API to allow the spec to be mapped to the actual server endpoints.
+- `WithInternalServerErrors`: Also verify that all declared 500 responses have been tested. This is not really
+recommended since if an internal server error can be produced in a test, the problem should probably just be fixed 
+instead.
+- `WithRequestValidation`: Also validate that the request adheres to the spec. This can be useful when developing the
+tests as it checks that the client is well-behaved, but makes less sense once the contract tests are done, as [the server
+should ideally be lenient in the data that it accepts](https://en.wikipedia.org/wiki/Robustness_principle).
+- `WithoutFullCoverage`: Do not require full coverage of all methods, paths and response codes. 
 
 # Building
 As Copper is a library, it will not build into a standalone binary. Copper is a standard go project, and only needs
