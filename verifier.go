@@ -5,9 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/getkin/kin-openapi/openapi3"
-	"github.com/getkin/kin-openapi/openapi3filter"
-	"github.com/getkin/kin-openapi/routers"
 	"io"
 	"net/http"
 	"net/http/httputil"
@@ -16,6 +13,10 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+
+	"github.com/getkin/kin-openapi/openapi3"
+	"github.com/getkin/kin-openapi/openapi3filter"
+	"github.com/getkin/kin-openapi/routers"
 )
 
 var supportedMethods = []string{

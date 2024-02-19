@@ -2,11 +2,12 @@ package main
 
 import (
 	"encoding/json"
-	"github.com/callebjorkell/copper"
 	"io"
 	"net/http"
 	"os"
 	"testing"
+
+	"github.com/callebjorkell/copper"
 )
 
 type Pong struct {
