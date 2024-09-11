@@ -157,7 +157,7 @@ func (v *Verifier) Record(res *http.Response) {
 
 			bodyBytes := bytes.Buffer{}
 			bodyTee := io.TeeReader(res.Body, &bodyBytes)
-			err := openapi3filter.ValidateResponse(context.Background(), &openapi3filter.ResponseValidationInput{
+			responseErr := openapi3filter.ValidateResponse(context.Background(), &openapi3filter.ResponseValidationInput{
 				RequestValidationInput: reqInput,
 				Status:                 res.StatusCode,
 				Header:                 res.Header,
@@ -165,17 +165,29 @@ func (v *Verifier) Record(res *http.Response) {
 				Options:                reqInput.Options,
 			})
 
-			if err != nil {
-				v.errors = append(
-					v.errors,
-					joinError(ErrResponseInvalid, fmt.Errorf("%s %s: %d: %w", req.Method, req.URL.Path, res.StatusCode, err)),
-				)
-			}
+			// reset the body.
 			if bodyBytes.Len() > 0 {
 				res.Body = io.NopCloser(&bodyBytes)
 			}
 
 			end.checked = true
+
+			if responseErr != nil {
+				var parseErr *openapi3filter.ParseError
+				if v.conf.ignoreUnsupportedBodyFormats && errors.As(responseErr, &parseErr) {
+					if parseErr.Kind == openapi3filter.KindUnsupportedFormat {
+						// openapi3filter doesn't support the format, and we've elected to ignore those bodies, so just
+						// ignore the error and return.
+						return
+					}
+				}
+
+				v.errors = append(
+					v.errors,
+					joinError(ErrResponseInvalid, fmt.Errorf("%s %s: %d: %w", req.Method, req.URL.Path, res.StatusCode, responseErr)),
+				)
+			}
+
 			return
 		}
 	}

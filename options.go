@@ -5,11 +5,12 @@ import "strings"
 type Option func(c *config)
 
 type config struct {
-	basePath                  string
-	checkInternalServerErrors bool
-	checkRequest              bool
-	requestLogger             RequestLogger
-	disableFullCoverage       bool
+	basePath                     string
+	checkInternalServerErrors    bool
+	checkRequest                 bool
+	requestLogger                RequestLogger
+	disableFullCoverage          bool
+	ignoreUnsupportedBodyFormats bool
 }
 
 func getConfig(opts ...Option) config {
@@ -55,6 +56,15 @@ func WithRequestValidation() Option {
 func WithoutFullCoverage() Option {
 	return func(c *config) {
 		c.disableFullCoverage = true
+	}
+}
+
+// WithIgnoredUnsupportedBodyFormats is a functional Option to ignore unsupported body formats during response
+// validation. Using this, only the supported bodies will be validated, and hitting more esoteric media types will not
+// cause body validation to fail.
+func WithIgnoredUnsupportedBodyFormats() Option {
+	return func(c *config) {
+		c.ignoreUnsupportedBodyFormats = true
 	}
 }
 

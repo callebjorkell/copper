@@ -79,6 +79,8 @@ instead.
 tests as it checks that the client is well-behaved, but makes less sense once the contract tests are done, as [the server
 should ideally be lenient in the data that it accepts](https://en.wikipedia.org/wiki/Robustness_principle).
 - `WithoutFullCoverage`: Do not require full coverage of all methods, paths and response codes. 
+- `WithIgnoredUnsupportedBodyFormats`: Ignore response body validation failures that is because of it using a media type
+that we cannot validate. This can be used to validate calls to endpoints returning various binary payloads for example.
 
 # Building
 As Copper is a library, it will not build into a standalone binary. Copper is a standard go project, and only needs

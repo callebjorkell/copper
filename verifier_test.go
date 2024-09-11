@@ -1,6 +1,8 @@
 package copper
 
 import (
+	"bytes"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -68,6 +70,60 @@ func TestWithInternalServerErrors(t *testing.T) {
 
 		assert.NoError(t, v.CurrentError())
 	})
+}
+
+func TestWithFullCoverage(t *testing.T) {
+	videoSpec, err := os.ReadFile("testdata/video-spec.yaml")
+	require.NoError(t, err)
+	numberSpec, err := os.ReadFile("testdata/number-spec.yaml")
+	require.NoError(t, err)
+
+	t.Run("unsupported body formats cause parse errors", func(t *testing.T) {
+		v, err := NewVerifier(videoSpec)
+		require.NoError(t, err)
+
+		req := httptest.NewRequest(http.MethodGet, "/video", nil)
+		v.Record(&http.Response{
+			StatusCode: 200,
+			Request:    req,
+			Header:     http.Header{"Content-Type": []string{"video/mp4"}},
+			Body:       io.NopCloser(bytes.NewReader([]byte{0x01, 0x88})),
+		})
+
+		assert.Error(t, v.CurrentError())
+	})
+
+	t.Run("unsupported body formats can be ignored", func(t *testing.T) {
+		v, err := NewVerifier(videoSpec, WithIgnoredUnsupportedBodyFormats())
+		require.NoError(t, err)
+
+		req := httptest.NewRequest(http.MethodGet, "/video", nil)
+		v.Record(&http.Response{
+			StatusCode: 200,
+			Request:    req,
+			Header:     http.Header{"Content-Type": []string{"video/mp4"}},
+			Body:       io.NopCloser(bytes.NewReader([]byte{0x01, 0x88})),
+		})
+
+		assert.NoError(t, v.CurrentError())
+	})
+
+	t.Run("supported body formats are still validated even if unsupported bodies are ignored", func(t *testing.T) {
+		v, err := NewVerifier(numberSpec, WithIgnoredUnsupportedBodyFormats())
+		require.NoError(t, err)
+
+		req := httptest.NewRequest(http.MethodGet, "/mini", nil)
+		req.Header.Set("Content-Type", "application/json")
+		v.Record(&http.Response{
+			StatusCode: 200,
+			Request:    req,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"all_wrong": "yes"}`)),
+		})
+
+		assert.ErrorIs(t, v.CurrentError(), ErrResponseInvalid)
+	})
+
 }
 
 func TestWithRequestValidation(t *testing.T) {
