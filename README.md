@@ -71,7 +71,10 @@ See the [examples](examples) for complete examples.
 ## Options
 To alter the behavior of copper and control what type of validation will be done, functional options can be passed to
 the `WrapClient` or stand-alone `NewVerifier` constructors. The options are as follows:
-- `WithBasePath`: Sets the base path for the API to allow the spec to be mapped to the actual server endpoints.
+- `WithServer`: Sets the server and base path for the API to allow the spec to be mapped to the actual server endpoints.
+This is especially useful if the spec doesn't contain a server with the base path that the target of the tests have, or
+if the wrong entry is being used for verification. Without this option, the first server in the list that matches the
+base path of the request will be used.
 - `WithInternalServerErrors`: Also verify that all declared 500 responses have been tested. This is not really
 recommended since if an internal server error can be produced in a test, the problem should probably just be fixed 
 instead.
@@ -79,8 +82,6 @@ instead.
 tests as it checks that the client is well-behaved, but makes less sense once the contract tests are done, as [the server
 should ideally be lenient in the data that it accepts](https://en.wikipedia.org/wiki/Robustness_principle).
 - `WithoutFullCoverage`: Do not require full coverage of all methods, paths and response codes. 
-- `WithIgnoredUnsupportedBodyFormats`: Ignore response body validation failures that is because of it using a media type
-that we cannot validate. This can be used to validate calls to endpoints returning various binary payloads for example.
 
 # Building
 As Copper is a library, it will not build into a standalone binary. Copper is a standard go project, and only needs

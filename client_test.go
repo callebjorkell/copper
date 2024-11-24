@@ -15,37 +15,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestWithBasePath(t *testing.T) {
-	tt := []struct {
-		path string
-		want string
-	}{
-		{"", "/"},
-		{"/something", "/something"},
-		{"/some/thing/", "/some/thing"},
-		{"somebase", "/somebase"},
-	}
-
-	for _, tc := range tt {
-		t.Run(tc.path, func(t *testing.T) {
-			c := &config{}
-			opt := WithBasePath(tc.path)
-
-			opt(c)
-
-			assert.Equal(t, tc.want, c.basePath)
-		})
-	}
-}
-
 func TestDifferentBase(t *testing.T) {
-	f, err := os.Open("testdata/delete-spec.yaml")
+	f, err := os.Open("testdata/two-servers-spec.yaml")
 	require.NoError(t, err)
 	defer f.Close()
 
 	s := httptest.NewServer(http.HandlerFunc(
 		func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path == "/mybase/thing/10" {
+			if r.URL.Path == "/other/base/thing/10" || r.URL.Path == "/first/thing/20" {
 				w.WriteHeader(http.StatusNoContent)
 			} else {
 				w.WriteHeader(http.StatusBadRequest)
@@ -54,12 +31,41 @@ func TestDifferentBase(t *testing.T) {
 	)
 	defer s.Close()
 
-	c, err := WrapClient(http.DefaultClient, f, WithBasePath("/mybase"))
+	c, err := WrapClient(http.DefaultClient, f)
 	require.NoError(t, err)
 
-	_, err = c.Delete(s.URL + "/mybase/thing/10")
+	_, err = c.Delete(s.URL + "/first/thing/20")
 	assert.NoError(t, err)
+	c.Verify(t)
 
+	c.Reset()
+
+	_, err = c.Delete(s.URL + "/other/base/thing/10")
+	assert.NoError(t, err)
+	c.Verify(t)
+}
+
+func TestAdditionalServers(t *testing.T) {
+	f, err := os.Open("testdata/minimal-spec.yaml")
+	require.NoError(t, err)
+	defer f.Close()
+
+	s := httptest.NewServer(http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/nested/base/ping" {
+				w.WriteHeader(http.StatusNoContent)
+			} else {
+				w.WriteHeader(http.StatusNotFound)
+			}
+		}),
+	)
+	defer s.Close()
+
+	c, err := WrapClient(http.DefaultClient, f, WithServer(s.URL+"/nested/base"))
+	require.NoError(t, err)
+
+	_, err = c.Get(s.URL + "/nested/base/ping")
+	assert.NoError(t, err)
 	c.Verify(t)
 }
 

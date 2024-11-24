@@ -1,106 +1,112 @@
 package copper
 
 import (
-	"bytes"
-	"context"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/httputil"
-	"regexp"
 	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
 
-	"github.com/getkin/kin-openapi/openapi3"
-	"github.com/getkin/kin-openapi/openapi3filter"
-	"github.com/getkin/kin-openapi/routers"
+	"github.com/pb33f/libopenapi"
+	validator "github.com/pb33f/libopenapi-validator"
+	validatorerr "github.com/pb33f/libopenapi-validator/errors"
+	"github.com/pb33f/libopenapi-validator/paths"
+	"github.com/pb33f/libopenapi-validator/schema_validation"
+	v3 "github.com/pb33f/libopenapi/datamodel/high/v3"
 )
 
-var supportedMethods = []string{
-	http.MethodGet,
-	http.MethodHead,
-	http.MethodPut,
-	http.MethodPost,
-	http.MethodDelete,
-	http.MethodPatch,
-	http.MethodOptions,
-}
-
-type endpoint struct {
-	uriRe    *regexp.Regexp
-	path     string
-	checked  bool
-	method   string
-	response string
-	route    *routers.Route
-}
-
 type Verifier struct {
-	endpoints  []endpoint
-	spec       *openapi3.T
+	endpoints  *endpoints
 	errors     []error
 	conf       config
 	mu         sync.Mutex
 	reqCounter atomic.Int64
+	validator  validator.Validator
+	model      *v3.Document
 }
 
 // NewVerifier takes bytes for an OpenAPI spec and options, and then returns a new Verifier for the given spec. Supply
 // zero or more Option instances to change the behaviour of the Verifier.
 func NewVerifier(specBytes []byte, opts ...Option) (*Verifier, error) {
-	spec, err := loadSpec(specBytes)
+	spec, err := libopenapi.NewDocument(specBytes)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("unable to parse spec data: %w", err)
 	}
 
-	v := &Verifier{
-		conf: getConfig(opts...),
-		spec: spec,
+	ok, validationErrs := schema_validation.ValidateOpenAPIDocument(spec)
+	if !ok {
+		// This is needed to use errors.Join, since the returned slice is a []*ValidationError, and not []error.
+		errs := make([]error, len(validationErrs))
+		for i := range validationErrs {
+			errs[i] = validationErrs[i]
+		}
+		return nil, fmt.Errorf("schema is not valid: %w", errors.Join(errs...))
 	}
 
-	if err := v.loadPaths(); err != nil {
-		return nil, err
+	model, errs := spec.BuildV3Model()
+	if len(errs) > 0 {
+		return nil, fmt.Errorf("unable to create model: %w", errors.Join(errs...))
+	}
+
+	conf := getConfig(opts...)
+	if conf.serverBase != "" {
+		model.Model.Servers = []*v3.Server{
+			{
+				URL:         conf.serverBase,
+				Description: "Added by copper option",
+			},
+		}
+	}
+
+	docValidator := validator.NewValidatorFromV3Model(&model.Model)
+
+	var v = &Verifier{
+		conf:      conf,
+		validator: docValidator,
+		model:     &model.Model,
+		endpoints: newEndpoints(&model.Model, conf.checkInternalServerErrors),
 	}
 
 	return v, nil
 }
 
-func loadSpec(specBytes []byte) (*openapi3.T, error) {
-	loader := openapi3.NewLoader()
-	spec, err := loader.LoadFromData(specBytes)
-	if err != nil {
-		return nil, fmt.Errorf("unable to parse spec data: %w", err)
+func (v *Verifier) check(req *http.Request, res *http.Response) {
+	_, errs, foundPath := paths.FindPath(req, v.model)
+	if len(errs) > 0 {
+		v.appendErr(ErrNotPartOfSpec, fmt.Errorf("%v %v: %v", req.Method, req.URL.Path, toError(errs)))
+		return
 	}
 
-	if err := spec.Validate(loader.Context); err != nil {
-		return nil, fmt.Errorf("schema is not valid: %w", err)
-	}
-	return spec, nil
-}
+	v.endpoints.MarkChecked(foundPath, req.Method, strconv.Itoa(res.StatusCode))
 
-// loadPaths the paths into the data structure used verification
-// if lenient is set, internal errors will be skipped.
-func (v *Verifier) loadPaths() error {
-	if v.spec == nil {
-		return fmt.Errorf("spec is nil")
-	}
-
-	for path, item := range v.spec.Paths.Map() {
-		err := v.loadPath(path, item)
-		if err != nil {
-			return fmt.Errorf("unable to loadPaths path %q: %w", path, err)
+	// Select the right function for validation.
+	if v.conf.checkRequest {
+		ok, validationErrors := v.validator.ValidateHttpRequest(req)
+		if !ok {
+			v.appendErr(ErrRequestInvalid, fmt.Errorf("%s %s: %w", req.Method, req.URL.Path, toError(validationErrors)))
 		}
 	}
 
-	return nil
+	ok, validationErrors := v.validator.ValidateHttpResponse(req, res)
+	if !ok {
+		v.appendErr(ErrResponseInvalid, fmt.Errorf("%s %s: %w", req.Method, req.URL.Path, toError(validationErrors)))
+	}
+}
+
+func (v *Verifier) appendErr(sentinel SentinelError, err error) {
+	v.errors = append(
+		v.errors,
+		joinError(sentinel, err),
+	)
 }
 
 func (v *Verifier) Record(res *http.Response) {
 	req := res.Request
 
-	// The body has already been read, so try to reset the body since kin-openapi expects this to be readable
+	// The body has already been read, so try to reset the body
 	if req.GetBody != nil {
 		req.Body, _ = req.GetBody()
 	}
@@ -120,84 +126,8 @@ func (v *Verifier) Record(res *http.Response) {
 
 	v.mu.Lock()
 	defer v.mu.Unlock()
-	for i := range v.endpoints {
-		end := &v.endpoints[i]
-		if end.method != req.Method {
-			continue
-		}
 
-		if end.response != strconv.Itoa(res.StatusCode) {
-			continue
-		}
-
-		if end.uriRe.MatchString(req.URL.EscapedPath()) {
-			matches := end.uriRe.FindStringSubmatch(req.URL.EscapedPath())
-			params := make(map[string]string)
-			for i, name := range end.uriRe.SubexpNames() {
-				params[name] = matches[i]
-			}
-
-			reqInput := &openapi3filter.RequestValidationInput{
-				Request:    req,
-				Route:      end.route,
-				PathParams: params,
-				Options: &openapi3filter.Options{
-					MultiError: true,
-				},
-			}
-
-			if v.conf.checkRequest {
-				if err := openapi3filter.ValidateRequest(context.Background(), reqInput); err != nil {
-					v.errors = append(
-						v.errors,
-						joinError(ErrRequestInvalid, fmt.Errorf("%s %s: %w", req.Method, req.URL.Path, err)),
-					)
-				}
-			}
-
-			bodyBytes := bytes.Buffer{}
-			bodyTee := io.TeeReader(res.Body, &bodyBytes)
-			responseErr := openapi3filter.ValidateResponse(context.Background(), &openapi3filter.ResponseValidationInput{
-				RequestValidationInput: reqInput,
-				Status:                 res.StatusCode,
-				Header:                 res.Header,
-				Body:                   io.NopCloser(bodyTee),
-				Options:                reqInput.Options,
-			})
-
-			// reset the body.
-			if bodyBytes.Len() > 0 {
-				res.Body = io.NopCloser(&bodyBytes)
-			}
-
-			end.checked = true
-
-			if responseErr != nil {
-				var parseErr *openapi3filter.ParseError
-				if v.conf.ignoreUnsupportedBodyFormats && errors.As(responseErr, &parseErr) {
-					if parseErr.Kind == openapi3filter.KindUnsupportedFormat {
-						// openapi3filter doesn't support the format, and we've elected to ignore those bodies, so just
-						// ignore the error and return.
-						return
-					}
-				}
-
-				v.errors = append(
-					v.errors,
-					joinError(ErrResponseInvalid, fmt.Errorf("%s %s: %d: %w", req.Method, req.URL.Path, res.StatusCode, responseErr)),
-				)
-			}
-
-			return
-		}
-	}
-
-	if v.conf.checkInternalServerErrors || res.StatusCode != http.StatusInternalServerError {
-		v.errors = append(
-			v.errors,
-			joinError(ErrNotPartOfSpec, fmt.Errorf("%v %v: %v", req.Method, req.URL.Path, res.StatusCode)),
-		)
-	}
+	v.check(req, res)
 }
 
 // CurrentError is a convenience method for CurrentErrors, where the errors are joined into a single error, making
@@ -213,11 +143,9 @@ func (v *Verifier) CurrentErrors() []error {
 
 	var errs []error
 	if !v.conf.disableFullCoverage {
-		for i := range v.endpoints {
-			if !v.endpoints[i].checked {
-				err := fmt.Errorf("%s %s: %s", v.endpoints[i].method, v.endpoints[i].path, v.endpoints[i].response)
-				errs = append(errs, joinError(ErrNotChecked, err))
-			}
+		for _, e := range v.endpoints.Unchecked() {
+			err := fmt.Errorf("%s %s: %s", e.Method, e.Path, e.ResponseCode)
+			errs = append(errs, joinError(ErrNotChecked, err))
 		}
 	}
 
@@ -226,49 +154,26 @@ func (v *Verifier) CurrentErrors() []error {
 
 // Verify will cause the given test context to fail with an error if Error returns a non-nil error.
 func (v *Verifier) Verify(t *testing.T) {
+	t.Helper()
+
 	err := v.CurrentError()
 	if err != nil {
 		t.Error(err)
 	}
 }
 
-func (v *Verifier) loadPath(path string, i *openapi3.PathItem) error {
-	// Turn the path into a regular expression with named capture groups corresponding to the name of the parameter
-	// in the spec.
-	re := regexp.MustCompile("{([^}]*)}")
-	uri := fmt.Sprintf("^%v%v$", v.conf.basePath, re.ReplaceAllString(path, "(?P<$1>[^/]+)"))
-	uriRe, err := regexp.Compile(uri)
-	if err != nil {
-		return fmt.Errorf("could not compile regex for %v: %w", path, err)
+// Reset will remove all current errors, and start the Verifier from scratch. This allows it to be reused.
+func (v *Verifier) Reset() {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.errors = nil
+	v.endpoints = newEndpoints(v.model, v.conf.checkInternalServerErrors)
+}
+
+func toError(validationErrs []*validatorerr.ValidationError) error {
+	errs := make([]error, len(validationErrs))
+	for i, err := range validationErrs {
+		errs[i] = fmt.Errorf("%s, HowToFix: %s", err.Error(), err.HowToFix)
 	}
-
-	for _, method := range supportedMethods {
-		op := i.GetOperation(method)
-		if op == nil {
-			continue
-		}
-
-		for responseCode := range op.Responses.Map() {
-			if !v.conf.checkInternalServerErrors && responseCode == "500" {
-				continue
-			}
-
-			e := endpoint{
-				checked:  false,
-				method:   method,
-				response: responseCode,
-				uriRe:    uriRe,
-				path:     v.conf.basePath + path,
-				route: &routers.Route{
-					Spec:      v.spec,
-					PathItem:  i,
-					Method:    method,
-					Operation: op,
-				},
-			}
-			v.endpoints = append(v.endpoints, e)
-		}
-	}
-
-	return nil
+	return errors.Join(errs...)
 }

@@ -13,6 +13,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestInvalidSpec(t *testing.T) {
+	f, err := os.ReadFile("testdata/invalid-spec.yaml")
+	require.NoError(t, err)
+
+	_, err = NewVerifier(f)
+	require.Error(t, err)
+}
+
 func TestCurrentErrors(t *testing.T) {
 	f, err := os.ReadFile("testdata/thing-spec.yaml")
 	require.NoError(t, err)
@@ -72,29 +80,35 @@ func TestWithInternalServerErrors(t *testing.T) {
 	})
 }
 
-func TestWithFullCoverage(t *testing.T) {
+func TestReset(t *testing.T) {
+	f, err := os.ReadFile("testdata/delete-spec.yaml")
+	require.NoError(t, err)
+	v, err := NewVerifier(f)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodDelete, "/thing/10", nil)
+	v.Record(&http.Response{
+		StatusCode: 404,
+		Request:    req,
+	})
+	require.Error(t, v.CurrentError())
+
+	// Now reset and see that it is possible to re-use the Verifier.
+	v.Reset()
+
+	v.Record(&http.Response{
+		StatusCode: 204,
+		Request:    req,
+	})
+	v.Verify(t)
+}
+
+func TestBinaryBodies(t *testing.T) {
 	videoSpec, err := os.ReadFile("testdata/video-spec.yaml")
 	require.NoError(t, err)
-	numberSpec, err := os.ReadFile("testdata/number-spec.yaml")
-	require.NoError(t, err)
 
-	t.Run("unsupported body formats cause parse errors", func(t *testing.T) {
+	t.Run("binary body formats can be processed", func(t *testing.T) {
 		v, err := NewVerifier(videoSpec)
-		require.NoError(t, err)
-
-		req := httptest.NewRequest(http.MethodGet, "/video", nil)
-		v.Record(&http.Response{
-			StatusCode: 200,
-			Request:    req,
-			Header:     http.Header{"Content-Type": []string{"video/mp4"}},
-			Body:       io.NopCloser(bytes.NewReader([]byte{0x01, 0x88})),
-		})
-
-		assert.Error(t, v.CurrentError())
-	})
-
-	t.Run("unsupported body formats can be ignored", func(t *testing.T) {
-		v, err := NewVerifier(videoSpec, WithIgnoredUnsupportedBodyFormats())
 		require.NoError(t, err)
 
 		req := httptest.NewRequest(http.MethodGet, "/video", nil)
@@ -107,23 +121,6 @@ func TestWithFullCoverage(t *testing.T) {
 
 		assert.NoError(t, v.CurrentError())
 	})
-
-	t.Run("supported body formats are still validated even if unsupported bodies are ignored", func(t *testing.T) {
-		v, err := NewVerifier(numberSpec, WithIgnoredUnsupportedBodyFormats())
-		require.NoError(t, err)
-
-		req := httptest.NewRequest(http.MethodGet, "/mini", nil)
-		req.Header.Set("Content-Type", "application/json")
-		v.Record(&http.Response{
-			StatusCode: 200,
-			Request:    req,
-			Header:     http.Header{"Content-Type": []string{"application/json"}},
-			Body:       io.NopCloser(strings.NewReader(`{"all_wrong": "yes"}`)),
-		})
-
-		assert.ErrorIs(t, v.CurrentError(), ErrResponseInvalid)
-	})
-
 }
 
 func TestWithRequestValidation(t *testing.T) {

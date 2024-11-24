@@ -22,4 +22,19 @@ func TestJoinErrorIs(t *testing.T) {
 		assert.ErrorIs(t, err, ErrRequestInvalid)
 		assert.ErrorIs(t, err, testErr)
 	})
+
+	t.Run("sentinel can be fecthed", func(t *testing.T) {
+		err := joinError(ErrNotChecked, testErr)
+		assert.Equal(t, ErrNotChecked, err.Sentinel())
+	})
+
+	t.Run("error message contains sentinel", func(t *testing.T) {
+		err := joinError(ErrRequestInvalid, testErr)
+		assert.ErrorContains(t, err, "request invalid")
+	})
+
+	t.Run("error message contains sub message", func(t *testing.T) {
+		err := joinError(ErrResponseInvalid, testErr)
+		assert.ErrorContains(t, err, "my test error")
+	})
 }

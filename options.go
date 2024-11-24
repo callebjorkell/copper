@@ -1,11 +1,9 @@
 package copper
 
-import "strings"
-
 type Option func(c *config)
 
 type config struct {
-	basePath                     string
+	serverBase                   string
 	checkInternalServerErrors    bool
 	checkRequest                 bool
 	requestLogger                RequestLogger
@@ -22,11 +20,12 @@ func getConfig(opts ...Option) config {
 	return *c
 }
 
-// WithBasePath is a functional Option for setting the base path used when correlating the specification to the API
-// calls being recorded.
-func WithBasePath(path string) Option {
+// WithServer is a functional Option for setting the base path/host used when correlating the specification to the API
+// calls being recorded. This can be used when the specification doesn't have a server entry for the target of tests,
+// or when conflicts cause the wrong server to be selected for calculating the base path.
+func WithServer(host string) Option {
 	return func(c *config) {
-		c.basePath = "/" + strings.Trim(path, "/")
+		c.serverBase = host
 	}
 }
 
@@ -56,15 +55,6 @@ func WithRequestValidation() Option {
 func WithoutFullCoverage() Option {
 	return func(c *config) {
 		c.disableFullCoverage = true
-	}
-}
-
-// WithIgnoredUnsupportedBodyFormats is a functional Option to ignore unsupported body formats during response
-// validation. Using this, only the supported bodies will be validated, and hitting more esoteric media types will not
-// cause body validation to fail.
-func WithIgnoredUnsupportedBodyFormats() Option {
-	return func(c *config) {
-		c.ignoreUnsupportedBodyFormats = true
 	}
 }
 
