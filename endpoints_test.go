@@ -99,24 +99,38 @@ func TestIsChecked(t *testing.T) {
 		expected bool
 	}{
 		{
-			"check non-inserted path",
+			"non-inserted path",
 			"/foo",
 			"GET",
 			"200",
 			false,
 		},
 		{
-			"check checked path",
+			"checked path",
 			"/ping/{thevalue}",
 			"GET",
 			"401",
 			true,
 		},
 		{
-			"check existing unchecked",
+			"existing unchecked",
 			"/ping/{thevalue}",
 			"GET",
 			"404",
+			false,
+		},
+		{
+			"method is case insensitive",
+			"/ping/{thevalue}",
+			"get",
+			"401",
+			true,
+		},
+		{
+			"path is case sensitive",
+			"/Ping/{thevalue}",
+			http.MethodGet,
+			"401",
 			false,
 		},
 	}

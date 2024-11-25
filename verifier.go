@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -38,12 +39,7 @@ func NewVerifier(specBytes []byte, opts ...Option) (*Verifier, error) {
 
 	ok, validationErrs := schema_validation.ValidateOpenAPIDocument(spec)
 	if !ok {
-		// This is needed to use errors.Join, since the returned slice is a []*ValidationError, and not []error.
-		errs := make([]error, len(validationErrs))
-		for i := range validationErrs {
-			errs[i] = validationErrs[i]
-		}
-		return nil, fmt.Errorf("schema is not valid: %w", errors.Join(errs...))
+		return nil, fmt.Errorf("schema is not valid: %w", toError(validationErrs))
 	}
 
 	model, errs := spec.BuildV3Model()
@@ -171,9 +167,14 @@ func (v *Verifier) Reset() {
 }
 
 func toError(validationErrs []*validatorerr.ValidationError) error {
-	errs := make([]error, len(validationErrs))
-	for i, err := range validationErrs {
-		errs[i] = fmt.Errorf("%s, HowToFix: %s", err.Error(), err.HowToFix)
+	if len(validationErrs) == 1 {
+		return validationErrs[0]
 	}
-	return errors.Join(errs...)
+
+	s := strings.Builder{}
+	for _, err := range validationErrs {
+		s.WriteString("\n - ")
+		s.WriteString(err.Error())
+	}
+	return fmt.Errorf("validation errors: %s", s.String())
 }

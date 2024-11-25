@@ -3,12 +3,11 @@ package copper
 type Option func(c *config)
 
 type config struct {
-	serverBase                   string
-	checkInternalServerErrors    bool
-	checkRequest                 bool
-	requestLogger                RequestLogger
-	disableFullCoverage          bool
-	ignoreUnsupportedBodyFormats bool
+	serverBase                string
+	checkInternalServerErrors bool
+	checkRequest              bool
+	requestLogger             RequestLogger
+	disableFullCoverage       bool
 }
 
 func getConfig(opts ...Option) config {

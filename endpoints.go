@@ -36,7 +36,6 @@ func (e *endpoints) loadPaths(model *v3.Document) {
 }
 
 func (e *endpoints) loadPath(path string, i *v3.PathItem) {
-	path = strings.ToLower(path)
 	if _, ok := e.paths[path]; !ok {
 		e.paths[path] = methods{
 			methods: make(map[string]responses),
@@ -76,6 +75,7 @@ func (e *endpoints) responseMap(path, method string) map[string]bool {
 		return nil
 	}
 
+	method = strings.ToUpper(method)
 	m, ok := p.methods[method]
 	if !ok {
 		return nil
