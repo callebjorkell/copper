@@ -42,9 +42,9 @@ func NewVerifier(specBytes []byte, opts ...Option) (*Verifier, error) {
 		return nil, fmt.Errorf("schema is not valid: %w", toError(validationErrs))
 	}
 
-	model, errs := spec.BuildV3Model()
-	if len(errs) > 0 {
-		return nil, fmt.Errorf("unable to create model: %w", errors.Join(errs...))
+	model, err := spec.BuildV3Model()
+	if err != nil {
+		return nil, fmt.Errorf("unable to create model: %w", err)
 	}
 
 	conf := getConfig(opts...)
@@ -59,7 +59,7 @@ func NewVerifier(specBytes []byte, opts ...Option) (*Verifier, error) {
 
 	docValidator := validator.NewValidatorFromV3Model(&model.Model)
 
-	var v = &Verifier{
+	v := &Verifier{
 		conf:      conf,
 		validator: docValidator,
 		model:     &model.Model,
@@ -70,7 +70,7 @@ func NewVerifier(specBytes []byte, opts ...Option) (*Verifier, error) {
 }
 
 func (v *Verifier) check(req *http.Request, res *http.Response) {
-	_, errs, foundPath := paths.FindPath(req, v.model)
+	_, errs, foundPath := paths.FindPath(req, v.model, nil)
 	if len(errs) > 0 {
 		v.appendErr(ErrNotPartOfSpec, fmt.Errorf("%v %v: %v", req.Method, req.URL.Path, toError(errs)))
 		return
